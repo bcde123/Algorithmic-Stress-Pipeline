@@ -1,0 +1,27 @@
+# Core deep learning
+torch
+torchvision
+torchaudio
+
+# Data processing
+pandas
+numpy
+scipy
+
+# Machine learning & survival models
+scikit-learn
+scikit-survival
+
+# Visualization
+matplotlib
+seaborn
+
+# Reinforcement learning
+gymnasium
+
+# Testing
+pytest
+pytest-cov
+
+# Utilities
+tqdm
