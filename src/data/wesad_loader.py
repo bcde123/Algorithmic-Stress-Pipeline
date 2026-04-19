@@ -1,4 +1,5 @@
 import pickle
+import warnings
 import pandas as pd
 import numpy as np
 from pathlib import Path
@@ -23,7 +24,10 @@ class WESADLoader:
             raise FileNotFoundError(f"Pickle not found for {subject_id}")
 
         with open(subject_file, 'rb') as f:
-            data = pickle.load(f, encoding='latin1')
+            with warnings.catch_warnings():
+                warnings.filterwarnings("ignore", category=DeprecationWarning)
+                warnings.filterwarnings("ignore", message=".*align.*")
+                data = pickle.load(f, encoding='latin1')
 
         # Wrist data (E4)
         wrist_data = data['signal']['wrist']

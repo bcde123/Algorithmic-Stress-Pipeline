@@ -11,6 +11,7 @@ scipy
 # Machine learning & survival models
 scikit-learn
 scikit-survival
+lifelines
 
 # Visualization
 matplotlib

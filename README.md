@@ -38,7 +38,7 @@ python -m src.main
 **Using real datasets:**
 You can pass directories containing the physiological datasets (WESAD, Induced Stress, MMASH, SWELL) via environment variables. The integrated data loader will harmonize signals and apply exertion filtering automatically.
 ```bash
-WESAD_DIR=data/raw/wesad INDUCED_DIR="data/raw/wearable-device-dataset-from-induced-stress-and-structured-exercise-sessions-1.0.1" MMASH_DIR=data/raw/mmash SWELL_DIR=data/raw/swell python -m src.main
+WESAD_DIR=data/raw/wesad/WESAD INDUCED_DIR="data/raw/wearable-device-dataset-from-induced-stress-and-structured-exercise-sessions-1.0.1" MMASH_DIR=data/raw/mmash SWELL_DIR=data/raw/swell python -m src.main
 ```
 
 > Output visualizations and threshold reports will be saved into the `outputs/` directory.

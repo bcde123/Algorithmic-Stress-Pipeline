@@ -131,15 +131,25 @@ class IntegratedLoader:
     # ── private loaders — one per dataset ───────────────────────────────────
 
     def _load_wesad(self, data_dir: str) -> List[pd.DataFrame]:
-        loader     = WESADLoader(data_dir)
         subjects   = self.config.wesad_subjects or self._wesad_available_subjects(data_dir)
         streams    = []
 
         for sid in subjects:
+            # _wesad_available_subjects may return full absolute paths when
+            # it auto-detects a nested WESAD/ subdirectory.
+            sid_path = Path(sid)
+            if sid_path.is_absolute():
+                effective_dir = str(sid_path.parent)
+                effective_sid = sid_path.name
+            else:
+                effective_dir = data_dir
+                effective_sid = sid
+
+            loader = WESADLoader(effective_dir)
             try:
-                raw = loader.load_subject(sid)
+                raw = loader.load_subject(effective_sid)
             except FileNotFoundError:
-                logger.warning("WESAD subject %s not found — skipping.", sid)
+                logger.warning("WESAD subject %s not found — skipping.", effective_sid)
                 continue
 
             # Resample EDA & BVP signals to target_fs; labels to target_fs
@@ -172,7 +182,7 @@ class IntegratedLoader:
                 'HRV':   hrv[:min_len],
                 'stress_index': self.harmonizer.map_labels(lbl[:min_len], 'WESAD'),
                 'dataset':    'WESAD',
-                'subject_id': sid,
+                'subject_id': effective_sid,
             })
             df = self._post_process(df)
             streams.append(df)
@@ -313,9 +323,26 @@ class IntegratedLoader:
 
     @staticmethod
     def _wesad_available_subjects(data_dir: str) -> List[str]:
-        """Returns the list of WESAD subject folders (e.g. ['S2', 'S3', ...])."""
+        """
+        Returns the list of WESAD subject folders (e.g. ['S2', 'S3', ...]).
+
+        Auto-detects the common one-level nesting that occurs when the WESAD
+        archive is unzipped: data/raw/wesad/WESAD/S2/... The loader transparently
+        descends into the nested folder if no subject folders are found at the
+        top level.
+        """
         root = Path(data_dir)
-        return sorted([p.name for p in root.iterdir() if p.is_dir() and p.name.startswith('S')])
+        subjects = sorted([p.name for p in root.iterdir() if p.is_dir() and p.name.startswith('S')])
+        if not subjects:
+            # Check for a nested WESAD/ subdirectory (common extraction layout)
+            nested = root / 'WESAD'
+            if nested.exists():
+                sub_names = sorted([p.name for p in nested.iterdir() if p.is_dir() and p.name.startswith('S')])
+                if sub_names:
+                    logger.info("Auto-detected nested WESAD layout — using %s", nested)
+                    # Return full absolute paths so _load_wesad can split dir / name correctly
+                    return [str(nested / s) for s in sub_names]
+        return subjects
 
     @staticmethod
     def _mmash_available_users(data_dir: str) -> List[str]:
