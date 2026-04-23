@@ -17,6 +17,17 @@ pip install -r requirements.txt
 
 ---
 
+## Supported Datasets & Their Purposes
+
+This framework leverages multiple real-world benchmark datasets, each serving a specific role in validating different aspects of algorithmic stress monitoring:
+
+- **WESAD (Wearable Stress and Affect Detection):** Primary dataset for empirical validation of the pipeline. It provides high-fidelity, synchronized physiological signals (EDA, BVP, TEMP, ACC) used to compute quantitative evaluation metrics (AUROC, F1, C-index) across all five pillars.
+- **Induced Stress (PhysioNet Wearable Dataset):** Used for distinguishing cognitive stress from physical exertion. By comparing stress sessions with aerobic/anaerobic exercise sessions, the pipeline trains its exertion-filtering components to isolate algorithmic pressure from physical activity.
+- **MMASH (Multilevel Monitoring of Activity and Sleep in Healthy people):** Provides 24-hour continuous monitoring data (beat-to-beat RR intervals and Actigraphy) essential for **Pillar 1: Long-Term Dynamics**. It captures multi-day circadian rhythms to track stress accumulation over time.
+- **SWELL Knowledge Work:** Tailored for evaluating stress in knowledge work environments. It contains raw inter-beat interval (RRI) streams and precomputed HRV features collected during typical office tasks, directly supporting the analysis of algorithmic pressure and burnout risk.
+
+---
+
 ## Running the Models
 
 This project comprises several analytical models that formulate an integrated pipeline. The framework relies on five core pillars:

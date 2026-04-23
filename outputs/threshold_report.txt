@@ -1,0 +1,18 @@
+──────────────────────────────────────────────────────────────────────────
+  PHYSIOLOGICAL STRESS THRESHOLD REPORT
+  Generated: 2026-04-20 02:15:50
+──────────────────────────────────────────────────────────────────────────
+  Subject: user_1
+
+  [Pillar 3] Latent Stress Regime Detection
+    • Windows flagged:    196 / 3919  (5.0%)  🟢 NORMAL
+    • AE threshold (95p): 0.55470
+    ⚠ SUSTAINED BREACH: 3 consecutive sessions above threshold — elevated burnout risk.
+
+  [Pillar 1b] Cumulative Work-Life Imbalance
+    • Imbalance score:    0.7371  (🟢 LOW)
+
+  [Pillar 5] DeepSurv Attrition Risk
+    • Log-hazard score:   0.2266  →  🟢 LOW ATTRITION RISK
+
+──────────────────────────────────────────────────────────────────────────
