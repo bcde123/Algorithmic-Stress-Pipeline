@@ -1,18 +1,23 @@
 ──────────────────────────────────────────────────────────────────────────
   PHYSIOLOGICAL STRESS THRESHOLD REPORT
-  Generated: 2026-04-20 02:15:50
+  Generated: 2026-05-04 10:44:05
 ──────────────────────────────────────────────────────────────────────────
-  Subject: user_1
+  Subject: mock_01
 
   [Pillar 3] Latent Stress Regime Detection
-    • Windows flagged:    196 / 3919  (5.0%)  🟢 NORMAL
-    • AE threshold (95p): 0.55470
-    ⚠ SUSTAINED BREACH: 3 consecutive sessions above threshold — elevated burnout risk.
+    • Windows flagged:    2 / 39  (5.1%)  🟢 NORMAL
+    • AE threshold (95p): 1.24099
 
   [Pillar 1b] Cumulative Work-Life Imbalance
-    • Imbalance score:    0.7371  (🟢 LOW)
+    • Imbalance score:    0.7271  (🟢 LOW)
 
   [Pillar 5] DeepSurv Attrition Risk
-    • Log-hazard score:   0.2266  →  🟢 LOW ATTRITION RISK
+    • Log-hazard score:   0.0033  →  🟢 LOW ATTRITION RISK
+
+  Managerial and Policy Implications
+    • Use stress thresholds as decision-support triggers for work redesign, not as punitive individual surveillance metrics.
+    • Prioritize task pacing, recovery breaks, and interruption reduction when high-demand contrasts increase stress_index or reduce HRV.
+    • Require external validation on a new site or dataset before deploying risk scores for staffing, scheduling, or retention decisions.
+    • Prefer parsimonious models unless complex models materially outperform transparent baselines on external holdouts.
 
 ──────────────────────────────────────────────────────────────────────────

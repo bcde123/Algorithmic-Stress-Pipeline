@@ -28,12 +28,12 @@ class NegativeLogPartialLikelihood(nn.Module):
         loss = -torch.sum(uncensored_likelihood * events) / (torch.sum(events) + 1e-7)
         return loss
 
-def train_survival_model(model, train_loader, val_loader, config):
+def train_survival_model(model, train_loader, val_loader, config, device=None):
     """
     Training loop for Deep Survival Model (DeepSurv).
     Aligns with Step 5: Treat sustained imbalance periods as covariates and predict the hazard ratios (attrition/burnout risk).
     """
-    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    device = torch.device(device or ('cuda' if torch.cuda.is_available() else 'cpu'))
     
     criterion = NegativeLogPartialLikelihood()
     # Survival models usually benefit from L2 Regularization (weight_decay)
@@ -43,7 +43,7 @@ def train_survival_model(model, train_loader, val_loader, config):
 
     print("Starting DeepSurv Model Training (Attrition Modeling)...")
     
-    history = {'train_loss': []}
+    history = {'train_loss': [], 'val_loss': []}
     
     for epoch in range(config.get('epochs', 50)):
         model.train()
@@ -66,8 +66,19 @@ def train_survival_model(model, train_loader, val_loader, config):
             
         train_loss /= len(train_loader)
         history['train_loss'].append(train_loss)
+        model.eval()
+        val_loss = 0.0
+        with torch.no_grad():
+            for covariates, times, events in val_loader:
+                covariates = covariates.to(device)
+                times = times.to(device)
+                events = events.to(device)
+                risk_preds = model(covariates)
+                val_loss += criterion(risk_preds.flatten(), times, events).item()
+        val_loss /= max(len(val_loader), 1)
+        history['val_loss'].append(val_loss)
         
         if (epoch + 1) % 5 == 0 or epoch == 0:
-            print(f"Epoch {epoch+1}/{config.get('epochs', 50)} - DeepSurv Risk Loss: {train_loss:.4f}")
+            print(f"Epoch {epoch+1}/{config.get('epochs', 50)} - DeepSurv Risk Loss: {train_loss:.4f} - Val Loss: {val_loss:.4f}")
 
     return model, history

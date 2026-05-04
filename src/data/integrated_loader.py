@@ -7,7 +7,8 @@ into a standardised ``PhysiologicalStream`` output with a fixed 7-feature tensor
     [EDA, HR, TEMP, ACC_x, ACC_y, ACC_z, HRV]   →   (float32, per-second)
 
 Every returned DataFrame also carries a ``stress_index`` column (Unified Stress
-Index ∈ [0, 1]) and a ``dataset`` tag for provenance tracking.
+Index ∈ [0, 1]), a ``dataset`` tag for provenance tracking, and an
+``intervention`` tag for causal/intervention contrasts when source labels permit.
 
 Usage
 -----
@@ -65,7 +66,8 @@ class DataConfig:
 # ──────────────────────────────────────────────────────────────────────────────
 
 FEATURE_COLS = ['EDA', 'HR', 'TEMP', 'ACC_x', 'ACC_y', 'ACC_z', 'HRV']
-OUTPUT_COLS  = FEATURE_COLS + ['stress_index', 'dataset', 'subject_id']
+CONTEXT_COLS = ['stress_index', 'dataset', 'subject_id', 'intervention']
+OUTPUT_COLS  = FEATURE_COLS + CONTEXT_COLS
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -82,6 +84,7 @@ class IntegratedLoader:
         - dtype   : float32 (feature columns) + str (dataset / subject_id)
         - Sampling: ``config.target_fs`` Hz (default 1 Hz)
         - Stress  : ``stress_index`` ∈ [0, 1] (Unified Stress Index)
+        - Context : ``intervention`` labels source conditions for validation
     """
 
     def __init__(self, config: DataConfig):
@@ -183,6 +186,7 @@ class IntegratedLoader:
                 'stress_index': self.harmonizer.map_labels(lbl[:min_len], 'WESAD'),
                 'dataset':    'WESAD',
                 'subject_id': effective_sid,
+                'intervention': self._wesad_intervention_labels(lbl[:min_len]),
             })
             df = self._post_process(df)
             streams.append(df)
@@ -204,6 +208,7 @@ class IntegratedLoader:
             raw['stress_index'] = raw['label'].astype(np.float32)
             raw['dataset']      = 'InducedStress'
             raw['subject_id']   = sid
+            raw['intervention'] = raw['session'].astype(str).str.lower() if 'session' in raw.columns else 'stress'
             df = raw[OUTPUT_COLS].copy()
             df = self._post_process(df)
             streams.append(df)
@@ -245,13 +250,17 @@ class IntegratedLoader:
             n = len(acti)
             if 'activity_type' in activity.columns:
                 lbl_raw = np.full(n, 0.0)
+                intervention_raw = np.full(n, 'baseline', dtype=object)
                 stress_idx = self.harmonizer.map_labels(activity['activity_type'].values, 'MMASH')
+                activity_labels = self._mmash_intervention_labels(activity['activity_type'].values)
                 # Simple broadcast: distribute activity labels evenly
                 chunk = max(1, n // max(1, len(stress_idx)))
                 for i, s in enumerate(stress_idx):
                     lbl_raw[i * chunk: (i + 1) * chunk] = s
+                    intervention_raw[i * chunk: (i + 1) * chunk] = activity_labels[i]
             else:
                 lbl_raw = np.zeros(n)
+                intervention_raw = np.full(n, 'baseline', dtype=object)
 
             df = pd.DataFrame({
                 'EDA':   np.zeros(n, dtype=np.float32),   # MMASH has no EDA
@@ -264,6 +273,7 @@ class IntegratedLoader:
                 'stress_index': lbl_raw[:n],
                 'dataset':    'MMASH',
                 'subject_id': uid,
+                'intervention': intervention_raw[:n],
             })
             df = self._post_process(df)
             streams.append(df)
@@ -284,8 +294,9 @@ class IntegratedLoader:
         # SWELL HRV feature CSV — columns vary by version; attempt best-effort mapping
         condition_col = next((c for c in hrv_df.columns if 'condition' in c.lower()), None)
 
+        condition_values = hrv_df[condition_col].values if condition_col else np.full(len(hrv_df), 'baseline')
         stress_index = self.harmonizer.map_labels(
-            hrv_df[condition_col].values if condition_col else np.zeros(len(hrv_df)),
+            condition_values,
             'SWELL'
         )
 
@@ -301,6 +312,7 @@ class IntegratedLoader:
             'stress_index': stress_index,
             'dataset':    'SWELL',
             'subject_id': 'pooled',
+            'intervention': pd.Series(condition_values).astype(str).str.lower().values,
         })
         df = self._post_process(df)
         streams.append(df)
@@ -320,6 +332,16 @@ class IntegratedLoader:
         df[FEATURE_COLS] = self.harmonizer.normalize_subject(df[FEATURE_COLS])
         df[FEATURE_COLS] = df[FEATURE_COLS].fillna(0.0)
         return df
+
+    @staticmethod
+    def _wesad_intervention_labels(labels: np.ndarray) -> np.ndarray:
+        mapping = {1: 'baseline', 2: 'stress', 3: 'amusement', 4: 'meditation'}
+        return np.array([mapping.get(int(l), 'baseline') for l in labels], dtype=object)
+
+    @staticmethod
+    def _mmash_intervention_labels(labels: np.ndarray) -> np.ndarray:
+        mapping = {1: 'recovery', 4: 'standard_work', 6: 'high_workload'}
+        return np.array([mapping.get(int(l), 'baseline') for l in labels], dtype=object)
 
     @staticmethod
     def _wesad_available_subjects(data_dir: str) -> List[str]:

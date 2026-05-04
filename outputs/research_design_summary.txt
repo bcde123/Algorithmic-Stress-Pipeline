@@ -1,0 +1,38 @@
+RESEARCH DESIGN SUMMARY
+==============================================================================
+Theoretical framework
+- Algorithmic demand [Job Demands-Resources model and labor-process economics]: High stress_index periods, EDA elevation, HR acceleration, and time-pressure/interruption labels.
+- Recovery resources and autonomy [Demand-Control model and conservation-of-resources theory]: HRV recovery, low EDA regimes, rest/recovery interventions, and circadian imbalance outputs.
+- Physiological strain [Effort-Recovery theory and occupational health economics]: Sustained reconstruction-error breaches, lowered HRV, elevated HR, and cumulative imbalance scores.
+- Exit and productivity risk [Labor supply, turnover, and compensating-differentials literature]: DeepSurv/Cox hazard scores and intervention contrasts that quantify stress-risk changes under different work designs.
+
+Model parsimony
+- StressMLP baseline: 897 trainable params; sample/param=2.230; acceptable for validation, monitor overfitting
+- DeepSurv: 897 trainable params; sample/param=2.230; acceptable for validation, monitor overfitting
+- StressTCN: 1,268 trainable params; sample/param=1.577; acceptable for validation, monitor overfitting
+- StressAutoencoder: 1,839 trainable params; sample/param=1.088; acceptable for validation, monitor overfitting
+- AttentionLSTM: 3,266 trainable params; sample/param=0.612; high complexity relative to available samples
+- CircadianAttentionLSTM: 4,611 trainable params; sample/param=0.434; high complexity relative to available samples
+
+Causal estimands
+- stress_index >= 0.60 -> HRV: effect=-1.0339, 95% CI [-1.1120, -0.9662], n_treated=1046, n_control=954; estimated under conditional exchangeability; validate with intervention contrasts
+- stress_index >= 0.60 -> HR: effect=+1.2675, 95% CI [+1.1991, +1.3216], n_treated=1046, n_control=954; estimated under conditional exchangeability; validate with intervention contrasts
+
+Intervention validation
+- high-demand intervention minus recovery/control on stress_index: effect=+0.5905, 95% CI [+0.5773, +0.6036], source=Synthetic; intervention contrast supports directional stress response
+
+Robustness and external validation
+- Robustness high-stress threshold 0.50: ATE on HRV=-1.0176; estimated under conditional exchangeability; validate with intervention contrasts
+- Robustness high-stress threshold 0.60: ATE on HRV=-1.0339; estimated under conditional exchangeability; validate with intervention contrasts
+- Robustness high-stress threshold 0.70: ATE on HRV=-1.0222; estimated under conditional exchangeability; validate with intervention contrasts
+- Robustness threshold sensitivity: effect range=+0.0162; stable sign across thresholds
+- External holdout Synthetic: AUROC=nan, n=2000; external validation requires at least two datasets
+
+Policy and managerial implications
+- Use stress thresholds as decision-support triggers for work redesign, not as punitive individual surveillance metrics.
+- Prioritize task pacing, recovery breaks, and interruption reduction when high-demand contrasts increase stress_index or reduce HRV.
+- Require external validation on a new site or dataset before deploying risk scores for staffing, scheduling, or retention decisions.
+- Prefer parsimonious models unless complex models materially outperform transparent baselines on external holdouts.
+- Treat sustained high-stress exposure as a recovery-resource deficit because adjusted estimates indicate lower HRV under high stress.
+- Use intervention contrasts to quantify expected stress reductions from moving workers out of high-demand regimes.
+==============================================================================

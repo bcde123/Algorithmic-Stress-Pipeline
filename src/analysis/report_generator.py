@@ -50,6 +50,9 @@ class SubjectReport:
     # Consecutive-session tracking (populated by ThresholdReportGenerator)
     consecutive_breaches: int                  = 0
 
+    # Research-design layer — policy and managerial implications
+    policy_implications: List[str]             = field(default_factory=list)
+
 
 @dataclass
 class ThresholdConfig:
@@ -95,6 +98,7 @@ class ThresholdReportGenerator:
         ae_threshold: Optional[float]       = None,
         imbalance:    Optional[float]       = None,
         risk_score:   Optional[float]       = None,
+        policy_implications: Optional[List[str]] = None,
     ) -> SubjectReport:
         """Construct a SubjectReport from model outputs."""
         flags = None
@@ -108,6 +112,7 @@ class ThresholdReportGenerator:
             ae_flags      = flags,
             imbalance_score = imbalance,
             risk_score      = risk_score,
+            policy_implications = policy_implications or [],
         )
         return rpt
 
@@ -172,6 +177,12 @@ class ThresholdReportGenerator:
                 risk_tag = "🟢 LOW ATTRITION RISK"
             lines.append(f"  [Pillar 5] DeepSurv Attrition Risk")
             lines.append(f"    • Log-hazard score:   {rs:.4f}  →  {risk_tag}")
+            lines.append('')
+
+        if rpt.policy_implications:
+            lines.append(f"  Managerial and Policy Implications")
+            for implication in rpt.policy_implications[:4]:
+                lines.append(f"    • {implication}")
             lines.append('')
 
         lines.append('─' * W)

@@ -1,13 +1,15 @@
 """
 main.py — End-to-End Algorithmic Stress Monitoring Pipeline
 
-Demonstrates all four analytical pillars against the integrated dataset:
+Demonstrates the analytical and research-design pillars against the integrated dataset:
 
   Pillar 0: Data Ingestion & Harmonization  — IntegratedLoader
   Pillar 1: Long-Term Dynamics              — CircadianAttentionLSTM
   Pillar 2: Short-Term Reactions            — StressTCN (multi-head)
   Pillar 3: Latent State Detection          — StressAutoencoder + RegimeDetector
   Pillar 4: Psychological Signatures        — SignatureAnalyzer (K-Means on attention)
+  Pillar 5: Attrition / Burnout Risk        — DeepSurv
+  Pillar 6: Research Design                 — Theory, causality, robustness, policy
 
 The pipeline works in two modes:
   1. REAL DATA — when dataset paths are configured via DataConfig.
@@ -22,10 +24,12 @@ Usage:
 
 import os
 import sys
+import json
 import torch
 import pandas as pd
 import numpy as np
 from pathlib import Path
+from datetime import datetime
 from torch.utils.data import DataLoader
 
 # Ensure the src/ directory is on the path for relative imports
@@ -61,6 +65,10 @@ from analysis.visualizer import (
     plot_circadian_curve,
 )
 from analysis.report_generator import ThresholdReportGenerator
+from analysis.research_design import (
+    build_research_design_summary,
+    format_research_design_summary,
+)
 
 # ── Evaluation metrics ────────────────────────────────────────────────────────
 from sklearn.metrics import (
@@ -79,12 +87,46 @@ from lifelines.utils import concordance_index
 # Constants
 # ─────────────────────────────────────────────────────────────────────────────
 
-N_EPOCHS   = 3     # quick validation; increase for real training
-SEQ_LEN    = 60    # seconds (at 1 Hz)
-STRIDE     = 10
-BATCH_SIZE = 1024
-DEVICE     = 'cuda' if torch.cuda.is_available() else 'cpu'
-OUTPUT_DIR = Path(__file__).parent.parent / "outputs"
+def _env_int(name: str, default: int) -> int:
+    value = os.environ.get(name)
+    return int(value) if value not in (None, "") else default
+
+
+def _env_float(name: str, default: float) -> float:
+    value = os.environ.get(name)
+    return float(value) if value not in (None, "") else default
+
+
+def _select_device() -> str:
+    requested = os.environ.get("ASMP_DEVICE")
+    if requested:
+        requested = requested.lower()
+        if requested == "cuda" and not torch.cuda.is_available():
+            raise RuntimeError("ASMP_DEVICE=cuda was requested, but torch.cuda.is_available() is false.")
+        return requested
+    return "cuda" if torch.cuda.is_available() else "cpu"
+
+
+def _env_flag(name: str, default: bool = False) -> bool:
+    value = os.environ.get(name)
+    if value in (None, ""):
+        return default
+    return value.strip().lower() in {"1", "true", "yes", "on"}
+
+
+N_EPOCHS   = _env_int("ASMP_EPOCHS", 3)     # quick validation; increase for real training
+SEQ_LEN    = _env_int("ASMP_SEQ_LEN", 60)    # seconds (at 1 Hz)
+STRIDE     = _env_int("ASMP_STRIDE", 10)
+BATCH_SIZE = _env_int("ASMP_BATCH_SIZE", 1024)
+DEVICE     = _select_device()
+NUM_WORKERS = _env_int("ASMP_NUM_WORKERS", 0)
+PIN_MEMORY = DEVICE == "cuda"
+EVAL_MAX_WINDOWS = _env_int("ASMP_EVAL_MAX_WINDOWS", 5000)
+MAX_ROWS = _env_int("ASMP_MAX_ROWS", 0)
+SAMPLE_FRACTION = _env_float("ASMP_SAMPLE_FRACTION", 1.0 if DEVICE == "cuda" else 0.1)
+AUTO_DISCOVER_DATA = _env_flag("ASMP_AUTO_DISCOVER_DATA", False)
+ROOT_DIR = Path(__file__).parent.parent
+OUTPUT_DIR = ROOT_DIR / "outputs"
 OUTPUT_DIR.mkdir(exist_ok=True)
 
 
@@ -99,6 +141,11 @@ def _make_synthetic_df(n: int = 2000) -> pd.DataFrame:
 
     # Simulate a stress ramp then recovery
     stress_profile = np.clip(np.sin(2 * np.pi * t / (n * 0.6)) * 0.5 + 0.5, 0, 1)
+    intervention = np.where(
+        stress_profile > 0.65,
+        'high_workload',
+        np.where(stress_profile < 0.35, 'recovery', 'standard_work')
+    )
 
     df = pd.DataFrame({
         'EDA':   rng.normal(0.5, 0.1, n) + stress_profile * 0.3,
@@ -111,8 +158,55 @@ def _make_synthetic_df(n: int = 2000) -> pd.DataFrame:
         'stress_index': stress_profile,
         'dataset':    'Synthetic',
         'subject_id': 'mock_01',
+        'intervention': intervention,
     })
     return df
+
+
+def _default_data_path(*parts: str):
+    path = ROOT_DIR.joinpath(*parts)
+    return str(path) if path.exists() else None
+
+
+def _build_loader_kwargs(name: str) -> dict:
+    raw = os.environ.get(name, "").strip()
+    if not raw:
+        return {}
+    values = [item.strip() for item in raw.split(",") if item.strip()]
+    return {name.lower().replace("asmp_", ""): values}
+
+
+def _make_loader(dataset, shuffle: bool) -> DataLoader:
+    return DataLoader(
+        dataset,
+        batch_size=BATCH_SIZE,
+        shuffle=shuffle,
+        num_workers=NUM_WORKERS,
+        pin_memory=PIN_MEMORY,
+    )
+
+
+def _maybe_limit_windows(loader: DataLoader, max_windows: int = EVAL_MAX_WINDOWS):
+    seen = 0
+    for batch in loader:
+        batch_size = len(batch[0])
+        if max_windows > 0 and seen >= max_windows:
+            break
+        seen += batch_size
+        yield batch
+
+
+def _history_min(history: dict, key: str) -> float:
+    values = history.get(key, [])
+    return float(np.nanmin(values)) if values else float("nan")
+
+
+def _serializable_float(value):
+    try:
+        value = float(value)
+    except (TypeError, ValueError):
+        return None
+    return value if np.isfinite(value) else None
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -123,16 +217,25 @@ def main():
     print("=" * 70)
     print("  ALGORITHMIC STRESS MONITORING — FULL PIPELINE")
     print(f"  Device: {DEVICE.upper()}")
+    if DEVICE == "cuda":
+        print(f"  GPU: {torch.cuda.get_device_name(0)}")
     print("=" * 70)
 
     # ── PILLAR 0: Data Ingestion & Harmonization ──────────────────────────────
     print("\n[PILLAR 0] Integrated Data Ingestion & Harmonization")
 
     config = DataConfig(
-        wesad_dir          = os.environ.get('WESAD_DIR'),
-        induced_stress_dir = os.environ.get('INDUCED_DIR'),
-        mmash_dir          = os.environ.get('MMASH_DIR'),
-        swell_dir          = os.environ.get('SWELL_DIR'),
+        wesad_dir          = os.environ.get('WESAD_DIR') or (_default_data_path("data", "raw", "wesad") if AUTO_DISCOVER_DATA else None),
+        induced_stress_dir = os.environ.get('INDUCED_DIR') or (_default_data_path(
+            "data", "raw", "wearable-device-dataset-from-induced-stress-and-structured-exercise-sessions-1.0.1",
+            "wearable-device-dataset-from-induced-stress-and-structured-exercise-sessions-1.0.1",
+        ) if AUTO_DISCOVER_DATA else None),
+        mmash_dir          = os.environ.get('MMASH_DIR') or (_default_data_path("data", "raw", "mmash") if AUTO_DISCOVER_DATA else None),
+        swell_dir          = os.environ.get('SWELL_DIR') or (_default_data_path("data", "raw", "swell") if AUTO_DISCOVER_DATA else None),
+        **_build_loader_kwargs("ASMP_WESAD_SUBJECTS"),
+        **_build_loader_kwargs("ASMP_INDUCED_STRESS_SUBJECTS"),
+        **_build_loader_kwargs("ASMP_MMASH_USERS"),
+        **_build_loader_kwargs("ASMP_SWELL_SUBJECTS"),
         apply_exertion_filter = True,
     )
 
@@ -154,12 +257,19 @@ def main():
         print("  No real dataset paths set — using synthetic fallback.")
         df = _make_synthetic_df()
 
-    if len(df) > 10000:
-        print(f"  Dataset is extremely large ({len(df):,} rows). Taking 10% subset for training...")
-        # Take the first contiguous 10% of each dataset to preserve time-series integrity
-        df = df.groupby('dataset', group_keys=False).apply(lambda x: x.iloc[:int(len(x) * 0.1)]).reset_index(drop=True)
+    original_rows = len(df)
+    if has_real_data and SAMPLE_FRACTION < 1.0:
+        print(f"  Dataset has {len(df):,} rows. Taking {SAMPLE_FRACTION:.0%} contiguous subset for this run...")
+        df = df.groupby('dataset', group_keys=False).apply(lambda x: x.iloc[:max(SEQ_LEN + 1, int(len(x) * SAMPLE_FRACTION))]).reset_index(drop=True)
+    if MAX_ROWS > 0 and len(df) > MAX_ROWS:
+        print(f"  Limiting dataset from {len(df):,} to ASMP_MAX_ROWS={MAX_ROWS:,} rows.")
+        df = df.groupby('dataset', group_keys=False).apply(lambda x: x.iloc[:max(SEQ_LEN + 1, int(MAX_ROWS * len(x) / len(df)))]).reset_index(drop=True)
+
+    if 'intervention' not in df.columns:
+        df['intervention'] = 'unlabeled'
 
     print(f"  DataFrame shape: {df.shape}")
+    print(f"  Source rows before sampling: {original_rows:,}")
     print(f"  Features: {FEATURE_COLS}")
     print(f"  Stress index range: [{df['stress_index'].min():.3f}, {df['stress_index'].max():.3f}]")
 
@@ -193,8 +303,8 @@ def main():
     ae_train, ae_val = torch.utils.data.random_split(
         ae_dataset, [ae_train_sz, len(ae_dataset) - ae_train_sz]
     )
-    ae_train_loader = DataLoader(ae_train, batch_size=BATCH_SIZE, shuffle=True)
-    ae_val_loader   = DataLoader(ae_val,   batch_size=BATCH_SIZE, shuffle=False)
+    ae_train_loader = _make_loader(ae_train, shuffle=True)
+    ae_val_loader   = _make_loader(ae_val,   shuffle=False)
 
     # Supervised (LSTM & TCN, Pillars 1 & 2)
     sup_df = df[FEATURE_COLS + ['stress_index']].copy()
@@ -205,19 +315,19 @@ def main():
     lstm_train, lstm_val = torch.utils.data.random_split(
         lstm_dataset, [lstm_train_sz, len(lstm_dataset) - lstm_train_sz]
     )
-    lstm_train_loader = DataLoader(lstm_train, batch_size=BATCH_SIZE, shuffle=True)
-    lstm_val_loader   = DataLoader(lstm_val,   batch_size=BATCH_SIZE, shuffle=False)
+    lstm_train_loader = _make_loader(lstm_train, shuffle=True)
+    lstm_val_loader   = _make_loader(lstm_val,   shuffle=False)
 
     print(f"  AE windows : {len(ae_dataset):,}  |  LSTM windows: {len(lstm_dataset):,}")
 
     # ── PILLAR 3: Deep Autoencoder ────────────────────────────────────────────
-    print("\n[PILLAR 3] Training Deep Autoencoder (Latent Regime Detector) …")
-    autoencoder = StressAutoencoder(input_dim=len(FEATURE_COLS), latent_dim=16)
+    print("\n[PILLAR 3] Training Parsimonious Autoencoder (Latent Regime Detector) …")
+    autoencoder = StressAutoencoder(input_dim=len(FEATURE_COLS), latent_dim=8)
     ae_config   = {'epochs': N_EPOCHS, 'learning_rate': 1e-3, 'patience': 2}
     trained_ae, ae_history = train_autoencoder(
-        autoencoder, ae_train_loader, ae_val_loader, ae_config
+        autoencoder, ae_train_loader, ae_val_loader, ae_config, device=DEVICE
     )
-    errors = calculate_reconstruction_error(trained_ae, ae_val_loader)
+    errors = calculate_reconstruction_error(trained_ae, ae_val_loader, device=DEVICE)
     threshold = float(np.percentile(errors, 95))
     flags     = (np.array(errors) > threshold).astype(int)
 
@@ -232,32 +342,29 @@ def main():
 
     # ── Pillar 3 Evaluation: Precision/Recall vs IsolationForest baseline ────
     print("\n[EVAL P3] Autoencoder anomaly detection vs IsolationForest baseline …")
-    # Build a ground-truth stress label for val windows
-    ae_true_labels = []
-    for _, batch_y in ae_val_loader:
-        # ae_val_loader has no targets (unsupervised) — match from lstm_val_loader
-        pass
     # Reconstruct ground-truth for val windows from the supervised loader
     ae_true_stress = []
-    for _, batch_y in lstm_val_loader:
+    for _, batch_y in _maybe_limit_windows(lstm_val_loader, max_windows=len(flags)):
         ae_true_stress.extend(batch_y.numpy().flatten().tolist())
     ae_true_arr = (np.array(ae_true_stress[:len(flags)]) > 0.5).astype(int)
+    eval_flags = flags[:len(ae_true_arr)]
 
     ae_prec = ae_rec = if_prec = if_rec = float('nan')
     try:
         if len(np.unique(ae_true_arr)) > 1:
-            ae_prec = precision_score(ae_true_arr, flags[:len(ae_true_arr)], zero_division=0)
-            ae_rec  = recall_score(ae_true_arr, flags[:len(ae_true_arr)], zero_division=0)
+            ae_prec = precision_score(ae_true_arr, eval_flags, zero_division=0)
+            ae_rec  = recall_score(ae_true_arr, eval_flags, zero_division=0)
 
             # IsolationForest baseline on flattened val windows
             ae_flat = []
-            for batch_x, _ in ae_val_loader:
+            for batch_x, _ in _maybe_limit_windows(ae_val_loader):
                 ae_flat.append(batch_x.numpy().reshape(len(batch_x), -1))
             ae_flat = np.concatenate(ae_flat, axis=0)
             iforest = IsolationForest(contamination=0.05, random_state=42)
             if_labels = (iforest.fit_predict(ae_flat) == -1).astype(int)
-            if_prec = precision_score(ae_true_arr, if_labels[:len(ae_true_arr)], zero_division=0)
-            if_rec  = recall_score(ae_true_arr, if_labels[:len(ae_true_arr)], zero_division=0)
+            eval_len = min(len(ae_true_arr), len(if_labels))
+            if_prec = precision_score(ae_true_arr[:eval_len], if_labels[:eval_len], zero_division=0)
+            if_rec  = recall_score(ae_true_arr[:eval_len], if_labels[:eval_len], zero_division=0)
     except Exception as e:
         print(f"  (Evaluation skipped: {e})")
 
@@ -265,18 +372,19 @@ def main():
     print(f"  IsolationForest— Precision: {if_prec:.4f}  |  Recall: {if_rec:.4f}")
 
     # ── PILLAR 1a: AttentionLSTM (short windows) ──────────────────────────────
-    print("\n[PILLAR 1a] Training Attention-LSTM (standard windows) …")
-    lstm_model  = AttentionLSTM(input_dim=len(FEATURE_COLS), hidden_dim=32, num_layers=2, output_dim=1)
+    print("\n[PILLAR 1a] Training Parsimonious Attention-LSTM (standard windows) …")
+    lstm_model  = AttentionLSTM(input_dim=len(FEATURE_COLS), hidden_dim=16, num_layers=1, output_dim=1)
     lstm_config = {'epochs': N_EPOCHS, 'learning_rate': 1e-3, 'patience': 2}
     trained_lstm, lstm_history = train_attention_lstm(
-        lstm_model, lstm_train_loader, lstm_val_loader, lstm_config
+        lstm_model, lstm_train_loader, lstm_val_loader, lstm_config, device=DEVICE
     )
 
     # Collect attention weights for Pillar 4 + predictions for evaluation
     trained_lstm.eval()
     attn_profiles, lstm_preds, lstm_trues = [], [], []
     with torch.no_grad():
-        for batch_x, batch_y in lstm_val_loader:
+        for batch_x, batch_y in _maybe_limit_windows(lstm_val_loader):
+            batch_x = batch_x.to(DEVICE)
             preds, attn = trained_lstm(batch_x)
             weighted = torch.sum(attn * batch_x, dim=1).cpu().numpy()
             attn_profiles.append(weighted)
@@ -300,7 +408,7 @@ def main():
             lstm_f1    = f1_score(true_binary, lstm_binary, zero_division=0)
 
             # SVM baseline: train on flattened val windows
-            val_X_flat = np.array([b.numpy().flatten() for b, _ in lstm_val_loader
+            val_X_flat = np.array([b.numpy().flatten() for b, _ in _maybe_limit_windows(lstm_val_loader)
                                    for b in b])[:len(true_binary)]
             svm_pipe = make_pipeline(StandardScaler(), SVR(kernel='rbf', C=1.0))
             svm_pipe.fit(val_X_flat, lstm_trues_arr)
@@ -320,18 +428,19 @@ def main():
     # Note: a fully meaningful circadian encoding requires 24-hour (86 400-step)
     # sequences; here we train on 60-second windows as a pipeline verification.
     circ_model = CircadianAttentionLSTM(
-        input_dim=len(FEATURE_COLS), embed_dim=32, hidden_dim=32,
-        num_layers=2, output_dim=1, max_seq_len=SEQ_LEN + 100
+        input_dim=len(FEATURE_COLS), embed_dim=16, hidden_dim=16,
+        num_layers=1, output_dim=1, max_seq_len=SEQ_LEN + 100
     )
     circ_config = {'epochs': N_EPOCHS, 'learning_rate': 1e-3, 'patience': 2}
     trained_circ, circ_history = train_attention_lstm(
-        circ_model, lstm_train_loader, lstm_val_loader, circ_config
+        circ_model, lstm_train_loader, lstm_val_loader, circ_config, device=DEVICE
     )
     # Evaluate CircadianLSTM (previously had zero evaluation — only a random demo input)
     trained_circ.eval()
     circ_preds, circ_trues = [], []
     with torch.no_grad():
-        for batch_x, batch_y in lstm_val_loader:
+        for batch_x, batch_y in _maybe_limit_windows(lstm_val_loader):
+            batch_x = batch_x.to(DEVICE)
             s_idx_b, imbal_b, attn_w_b = trained_circ(batch_x)
             circ_preds.extend(s_idx_b.squeeze(-1).cpu().numpy().tolist())
             circ_trues.extend(batch_y.numpy().flatten().tolist())
@@ -363,7 +472,7 @@ def main():
     # ── PILLAR 2: StressTCN (multi-head) ─────────────────────────────────────
     print("\n[PILLAR 2] Training StressTCN (Short-Term Reactions) …")
     tcn_model  = StressTCN(
-        input_dim=len(FEATURE_COLS), num_channels=[32, 32], output_dim=1, num_fragments=5
+        input_dim=len(FEATURE_COLS), num_channels=[16], output_dim=1, num_fragments=3
     )
     tcn_config = {'epochs': N_EPOCHS, 'learning_rate': 1e-3, 'patience': 2,
                   'alpha': 0.7, 'beta': 0.3}
@@ -377,7 +486,7 @@ def main():
     trained_tcn.eval()
     tcn_preds, tcn_trues = [], []
     with torch.no_grad():
-        for batch_x, batch_y in lstm_val_loader:
+        for batch_x, batch_y in _maybe_limit_windows(lstm_val_loader):
             batch_x = batch_x.to(DEVICE)
             out = trained_tcn(batch_x)
             # TCN may return (pred, aux) tuple depending on training config
@@ -401,7 +510,7 @@ def main():
     print("\n[PILLAR 4] Clustering Psychological Signatures …")
     from sklearn.cluster import KMeans
     n_clusters = 3
-    kmeans     = KMeans(n_clusters=n_clusters, random_state=42, n_init='auto')
+    kmeans     = KMeans(n_clusters=n_clusters, random_state=42, n_init=10)
     clusters   = kmeans.fit_predict(attn_profiles)
     centers    = kmeans.cluster_centers_
 
@@ -436,7 +545,7 @@ def main():
 
         # NMI: compare cluster labels vs binarised stress (if ground-truth exists)
         val_stress_labels = []
-        for batch_x, batch_y in lstm_val_loader:
+        for batch_x, batch_y in _maybe_limit_windows(lstm_val_loader):
             val_stress_labels.extend(batch_y.numpy().flatten().tolist())
         stress_binary = (np.array(val_stress_labels[:len(clusters)]) > 0.5).astype(int)
         nmi_score = normalized_mutual_info_score(stress_binary, clusters[:len(stress_binary)])
@@ -458,20 +567,21 @@ def main():
     surv_train, surv_val = torch.utils.data.random_split(
         surv_dataset, [surv_train_sz, len(surv_dataset) - surv_train_sz]
     )
-    surv_train_loader = DataLoader(surv_train, batch_size=BATCH_SIZE, shuffle=True)
-    surv_val_loader   = DataLoader(surv_val,   batch_size=BATCH_SIZE, shuffle=False)
+    surv_train_loader = _make_loader(surv_train, shuffle=True)
+    surv_val_loader   = _make_loader(surv_val,   shuffle=False)
 
-    deepsurv_model = DeepSurv(input_dim=len(FEATURE_COLS), hidden_layers=[64, 32])
+    deepsurv_model = DeepSurv(input_dim=len(FEATURE_COLS), hidden_layers=[32, 16])
     surv_config    = {'epochs': N_EPOCHS, 'learning_rate': 1e-4}
     trained_surv, surv_history = train_survival_model(
-        deepsurv_model, surv_train_loader, surv_val_loader, surv_config
+        deepsurv_model, surv_train_loader, surv_val_loader, surv_config, device=DEVICE
     )
 
     # Compute per-subject mean risk score from the trained model
     trained_surv.eval()
     all_risks, all_durations, all_events = [], [], []
     with torch.no_grad():
-        for covs, durations, events in surv_val_loader:
+        for covs, durations, events in _maybe_limit_windows(surv_val_loader):
+            covs = covs.to(DEVICE)
             risk = trained_surv(covs).squeeze().cpu().numpy()
             all_risks.extend(risk.tolist() if risk.ndim > 0 else [float(risk)])
             all_durations.extend(durations.numpy().flatten().tolist())
@@ -494,9 +604,10 @@ def main():
 
             # Cox PH baseline on mean features per window
             cox_features = []
-            for covs, _, _ in surv_val_loader:
+            for covs, _, _ in _maybe_limit_windows(surv_val_loader):
                 cox_features.append(covs.numpy())
             cox_features = np.concatenate(cox_features, axis=0)
+            cox_features = cox_features[:len(durations_arr)]
             cox_df = pd.DataFrame(cox_features, columns=FEATURE_COLS)
             cox_df['duration'] = durations_arr[:len(cox_df)]
             cox_df['event']    = events_arr[:len(cox_df)]
@@ -515,7 +626,7 @@ def main():
 
     # ── Unified Metrics Summary ───────────────────────────────────────────────
     print("\n" + "=" * 70)
-    print("  QUANTITATIVE EVALUATION SUMMARY (addresses reviewer critique)")
+    print("  QUANTITATIVE EVALUATION SUMMARY")
     print("=" * 70)
     print(f"  {'Pillar':<12} {'Model':<28} {'Metric':<12} {'Value':>8}  {'Baseline':>10}")
     print("  " + "-" * 68)
@@ -535,6 +646,104 @@ def main():
     print("  Baseline column: SVM (P1a) | IsolationForest (P3) | Cox PH (P5)")
     print("=" * 70)
 
+    dataset_summary = (
+        df.groupby("dataset")
+        .agg(rows=("stress_index", "size"), mean_stress=("stress_index", "mean"), high_stress_rate=("stress_index", lambda x: float((x >= 0.6).mean())))
+        .reset_index()
+    )
+    dataset_summary.to_csv(OUTPUT_DIR / "dataset_summary.csv", index=False)
+
+    evaluation_rows = [
+        {"pillar": "P1a", "model": "AttentionLSTM", "metric": "AUROC", "value": lstm_auroc, "baseline_model": "SVM", "baseline_value": svm_auroc},
+        {"pillar": "P1a", "model": "AttentionLSTM", "metric": "F1", "value": lstm_f1, "baseline_model": "SVM", "baseline_value": svm_f1},
+        {"pillar": "P1b", "model": "CircadianLSTM", "metric": "AUROC", "value": circ_auroc, "baseline_model": None, "baseline_value": None},
+        {"pillar": "P1b", "model": "CircadianLSTM", "metric": "F1", "value": circ_f1, "baseline_model": None, "baseline_value": None},
+        {"pillar": "P2", "model": "StressTCN", "metric": "AUROC", "value": tcn_auroc, "baseline_model": None, "baseline_value": None},
+        {"pillar": "P2", "model": "StressTCN", "metric": "F1", "value": tcn_f1, "baseline_model": None, "baseline_value": None},
+        {"pillar": "P3", "model": "StressAutoencoder", "metric": "Precision", "value": ae_prec, "baseline_model": "IsolationForest", "baseline_value": if_prec},
+        {"pillar": "P3", "model": "StressAutoencoder", "metric": "Recall", "value": ae_rec, "baseline_model": "IsolationForest", "baseline_value": if_rec},
+        {"pillar": "P4", "model": "K-Means", "metric": "Silhouette", "value": sil_score, "baseline_model": None, "baseline_value": None},
+        {"pillar": "P4", "model": "K-Means", "metric": "DB-Index", "value": db_score, "baseline_model": None, "baseline_value": None},
+        {"pillar": "P4", "model": "K-Means", "metric": "NMI", "value": nmi_score, "baseline_model": None, "baseline_value": None},
+        {"pillar": "P5", "model": "DeepSurv", "metric": "C-index", "value": cindex_deepsurv, "baseline_model": "Cox PH", "baseline_value": cindex_cox},
+    ]
+    metrics_df = pd.DataFrame(evaluation_rows)
+    metrics_df.to_csv(OUTPUT_DIR / "evaluation_metrics.csv", index=False)
+
+    histories = {
+        "StressAutoencoder": ae_history,
+        "AttentionLSTM": lstm_history,
+        "CircadianAttentionLSTM": circ_history,
+        "StressTCN": tcn_history,
+        "DeepSurv": surv_history,
+    }
+    history_rows = []
+    for model_name, history in histories.items():
+        max_len = max((len(values) for values in history.values()), default=0)
+        for idx in range(max_len):
+            row = {"model": model_name, "epoch": idx + 1}
+            for key, values in history.items():
+                row[key] = values[idx] if idx < len(values) else np.nan
+            history_rows.append(row)
+    history_df = pd.DataFrame(history_rows)
+    history_df.to_csv(OUTPUT_DIR / "training_history.csv", index=False)
+
+    metrics_payload = {
+        "run": {
+            "timestamp": datetime.utcnow().isoformat(timespec="seconds") + "Z",
+            "device": DEVICE,
+            "gpu": torch.cuda.get_device_name(0) if DEVICE == "cuda" else None,
+            "epochs": N_EPOCHS,
+            "batch_size": BATCH_SIZE,
+            "sequence_length": SEQ_LEN,
+            "stride": STRIDE,
+            "source_rows": int(original_rows),
+            "rows_used": int(len(df)),
+            "ae_windows": int(len(ae_dataset)),
+            "lstm_windows": int(len(lstm_dataset)),
+            "survival_windows": int(len(surv_dataset)),
+        },
+        "metrics": [
+            {key: _serializable_float(value) if key in {"value", "baseline_value"} else value for key, value in row.items()}
+            for row in evaluation_rows
+        ],
+        "thresholds": {
+            "ae_reconstruction_95p": _serializable_float(threshold),
+            "flagged_windows": int(flags.sum()),
+            "total_flag_windows": int(len(flags)),
+            "flagged_pct": _serializable_float(100.0 * flags.sum() / max(len(flags), 1)),
+            "mean_attrition_risk": _serializable_float(mean_risk),
+        },
+        "training": {
+            model_name: {key: [_serializable_float(item) for item in values] for key, values in history.items()}
+            for model_name, history in histories.items()
+        },
+    }
+    (OUTPUT_DIR / "evaluation_metrics.json").write_text(json.dumps(metrics_payload, indent=2), encoding="utf-8")
+    print("  [Saved] evaluation_metrics.csv, evaluation_metrics.json, training_history.csv, dataset_summary.csv")
+
+    # ── Research Design: theory, causality, validation, parsimony ─────────────
+    print("\n[RESEARCH DESIGN] Building theory, causality, robustness, and policy summary …")
+    model_registry = {
+        'StressMLP baseline': StressMLP(input_dim=len(FEATURE_COLS), hidden_dims=[32, 16]),
+        'StressAutoencoder': trained_ae,
+        'AttentionLSTM': trained_lstm,
+        'CircadianAttentionLSTM': trained_circ,
+        'StressTCN': trained_tcn,
+        'DeepSurv': trained_surv,
+    }
+    research_summary = build_research_design_summary(
+        df=df,
+        feature_cols=FEATURE_COLS,
+        models=model_registry,
+        n_model_samples=len(df),
+    )
+    research_text = format_research_design_summary(research_summary)
+    print(research_text)
+    research_path = OUTPUT_DIR / 'research_design_summary.txt'
+    research_path.write_text(research_text, encoding='utf-8')
+    print("  [Saved] research_design_summary.txt")
+
     # ── Threshold Report ──────────────────────────────────────────────────────
     print("\n[REPORT] Generating threshold report …")
     reporter = ThresholdReportGenerator()
@@ -544,6 +753,7 @@ def main():
         ae_threshold = threshold,
         imbalance    = float(imbal.mean().item()),
         risk_score   = mean_risk,
+        policy_implications = research_summary.managerial_implications,
     )
     report.consecutive_breaches = ThresholdReportGenerator.compute_consecutive_breaches(
         np.array(flags)

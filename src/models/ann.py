@@ -25,7 +25,7 @@ class StressMLP(nn.Module):
 
     Args:
         input_dim   : number of input features (or seq_len * n_features if flat).
-        hidden_dims : list of hidden-layer widths (default=[128, 64, 32]).
+        hidden_dims : list of hidden-layer widths (default=[32, 16]).
         dropout     : dropout probability applied after each hidden layer.
         pool_input  : if True, the network accepts (B, T, F) tensors and
                       applies global-average pooling over the time dimension
@@ -41,7 +41,7 @@ class StressMLP(nn.Module):
     ):
         super(StressMLP, self).__init__()
         if hidden_dims is None:
-            hidden_dims = [128, 64, 32]
+            hidden_dims = [32, 16]
 
         self.pool_input = pool_input
 

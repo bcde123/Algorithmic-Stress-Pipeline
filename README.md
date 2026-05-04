@@ -1,6 +1,8 @@
 # Algorithmic Stress Monitoring Pipeline
 
-A comprehensive machine learning framework leveraging physiological data (Empatica E4, etc.) to analyze stress, burnout, and algorithmic pressure in supply chain and knowledge work.
+A comprehensive machine learning and research-design framework leveraging physiological data (Empatica E4, etc.) to analyze stress, burnout, and algorithmic pressure in supply chain and knowledge work.
+
+The contribution is organized around organizational behavior and labor-economics theory: algorithmic work demands create physiological strain, recovery resources moderate that strain, and sustained imbalance can translate into productivity, retention, and worker-welfare outcomes.
 
 ## Setup & Installation
 
@@ -19,27 +21,28 @@ pip install -r requirements.txt
 
 ## Supported Datasets & Their Purposes
 
-This framework leverages multiple real-world benchmark datasets, each serving a specific role in validating different aspects of algorithmic stress monitoring:
+This framework leverages multiple real-world benchmark datasets, each serving a specific role in validating different aspects of algorithmic stress monitoring and intervention contrasts:
 
-- **WESAD (Wearable Stress and Affect Detection):** Primary dataset for empirical validation of the pipeline. It provides high-fidelity, synchronized physiological signals (EDA, BVP, TEMP, ACC) used to compute quantitative evaluation metrics (AUROC, F1, C-index) across all five pillars.
-- **Induced Stress (PhysioNet Wearable Dataset):** Used for distinguishing cognitive stress from physical exertion. By comparing stress sessions with aerobic/anaerobic exercise sessions, the pipeline trains its exertion-filtering components to isolate algorithmic pressure from physical activity.
-- **MMASH (Multilevel Monitoring of Activity and Sleep in Healthy people):** Provides 24-hour continuous monitoring data (beat-to-beat RR intervals and Actigraphy) essential for **Pillar 1: Long-Term Dynamics**. It captures multi-day circadian rhythms to track stress accumulation over time.
-- **SWELL Knowledge Work:** Tailored for evaluating stress in knowledge work environments. It contains raw inter-beat interval (RRI) streams and precomputed HRV features collected during typical office tasks, directly supporting the analysis of algorithmic pressure and burnout risk.
+- **WESAD (Wearable Stress and Affect Detection):** Primary dataset for empirical validation of the pipeline. It provides high-fidelity, synchronized physiological signals (EDA, BVP, TEMP, ACC) and labeled baseline/stress/recovery-like conditions used for prediction metrics and intervention-style contrasts.
+- **Induced Stress (PhysioNet Wearable Dataset):** Used for distinguishing cognitive stress from physical exertion. By comparing stress sessions with aerobic/anaerobic exercise sessions, the pipeline trains exertion-filtering components and tests whether high-demand exposure changes physiological outcomes after adjusting for physical movement.
+- **MMASH (Multilevel Monitoring of Activity and Sleep in Healthy people):** Provides 24-hour continuous monitoring data (beat-to-beat RR intervals and Actigraphy) essential for **Pillar 1: Long-Term Dynamics**. It supports recovery-resource and circadian-imbalance constructs.
+- **SWELL Knowledge Work:** Tailored for evaluating stress in knowledge work environments. It contains RRI streams and precomputed HRV features collected during no-stress, interruption, and time-pressure work conditions, directly supporting managerial intervention validation.
 
 ---
 
 ## Running the Models
 
-This project comprises several analytical models that formulate an integrated pipeline. The framework relies on five core pillars:
-- **Pillar 1: Long-Term Dynamics** (AttentionLSTM / CircadianAttentionLSTM)
-- **Pillar 2: Short-Term Reactions** (StressTCN)
-- **Pillar 3: Latent State Detection** (StressAutoencoder)
+This project comprises several analytical models that formulate an integrated pipeline. The framework now separates prediction from research design and relies on six core pillars:
+- **Pillar 1: Long-Term Dynamics** (parsimonious AttentionLSTM / CircadianAttentionLSTM)
+- **Pillar 2: Short-Term Reactions** (parsimonious StressTCN)
+- **Pillar 3: Latent State Detection** (compact StressAutoencoder)
 - **Pillar 4: Psychological Signatures** (K-Means Clustering on Attention Profiles)
-- **Pillar 5: Attrition / Burnout Risk** (DeepSurv)
+- **Pillar 5: Attrition / Burnout Risk** (DeepSurv and Cox PH baseline)
+- **Pillar 6: Research Design** (OB/labor-economics theory, causal estimands, intervention validation, robustness, external validation, and managerial implications)
 
-### 1. End-To-End Main Pipeline (Pillars 1-5)
+### 1. End-To-End Main Pipeline (Pillars 1-6)
 
-You can run the full integrated pipeline that trains and demonstrates all five pillars sequentially. If no data directories are provided, a synthetic fallback dataset will be auto-generated to validate model functionality.
+You can run the full integrated pipeline that trains the measurement models and writes the research-design summary. If no data directories are provided, a synthetic fallback dataset will be auto-generated to validate model functionality.
 
 **Using synthetic mock data:**
 ```bash
@@ -52,9 +55,18 @@ You can pass directories containing the physiological datasets (WESAD, Induced S
 WESAD_DIR=data/raw/wesad/WESAD INDUCED_DIR="data/raw/wearable-device-dataset-from-induced-stress-and-structured-exercise-sessions-1.0.1" MMASH_DIR=data/raw/mmash SWELL_DIR=data/raw/swell python -m src.main
 ```
 
-> Output visualizations and threshold reports will be saved into the `outputs/` directory.
+> Output visualizations, threshold reports, and `research_design_summary.txt` will be saved into the `outputs/` directory.
 
-### 2. Deep Reinforcement Learning Intervention Model
+### 2. Research Design Outputs
+
+The end-to-end pipeline writes a dedicated `outputs/research_design_summary.txt` file that includes:
+- **Theoretical framework:** Job Demands-Resources, Demand-Control, Effort-Recovery, and labor-economics constructs mapped to physiological variables.
+- **Causal estimands:** Adjusted high-stress exposure effects on outcomes such as HRV and HR, with bootstrap confidence intervals and explicit assumptions.
+- **Intervention validation:** High-demand versus recovery/control contrasts from source intervention labels where available.
+- **Robustness checks:** Threshold-sensitivity analysis and leave-one-dataset-out external validation.
+- **Policy implications:** Managerial guidance on pacing, breaks, task rotation, interruption reduction, and deployment safeguards.
+
+### 3. Deep Reinforcement Learning Intervention Model
 
 Complementing the measurement pillars is a reinforcement learning module designed to adaptively alter work policies to reduce physiological stress accumulation. It uses custom Proximal Policy Optimization (PPO).
 
@@ -77,7 +89,7 @@ result = train_ppo(env, policy, total_steps=50000)
 python run_rl.py
 ```
 
-### 3. Individual Model Architectures
+### 4. Individual Model Architectures
 
 If you wish to evaluate or embed specific model components independently, they can be found within the `src.models` module and trained using the loops established in the `src.training` directory:
 - **LSTM / Sequential Context:** `src.models.lstm` & `src.training.train_lstm`
@@ -93,7 +105,7 @@ If you wish to evaluate or embed specific model components independently, they c
 This repository is instrumented with rigorous integration validations. To run the automated tests against your local environment setup:
 
 ```bash
-pytest testing/ -v
+pytest tests/ -v
 # OR to run simply:
 pytest
 ```

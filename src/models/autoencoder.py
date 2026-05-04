@@ -13,23 +13,23 @@ class StressAutoencoder(nn.Module):
         
         # Encoder
         self.encoder = nn.Sequential(
-            nn.Linear(input_dim, 128),
+            nn.Linear(input_dim, 32),
             nn.ReLU(),
             nn.Dropout(0.1),
-            nn.Linear(128, 64),
+            nn.Linear(32, 16),
             nn.ReLU(),
-            nn.Linear(64, latent_dim),
+            nn.Linear(16, latent_dim),
             nn.ReLU()
         )
         
         # Decoder
         self.decoder = nn.Sequential(
-            nn.Linear(latent_dim, 64),
+            nn.Linear(latent_dim, 16),
             nn.ReLU(),
             nn.Dropout(0.1),
-            nn.Linear(64, 128),
+            nn.Linear(16, 32),
             nn.ReLU(),
-            nn.Linear(128, input_dim),
+            nn.Linear(32, input_dim),
             nn.Identity()  # Z-score inputs range beyond [0,1]; Identity + MSE loss is correct
         )
         

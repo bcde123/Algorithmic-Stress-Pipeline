@@ -74,14 +74,18 @@ class StressTCN(nn.Module):
         self.tcn = TemporalConvNet(input_dim, num_channels, kernel_size, dropout)
         
         # Head 1: Continuous Stress Index Regression
-        self.regression_head = nn.Linear(num_channels[-1], output_dim)
+        self.regression_head = nn.Sequential(
+            nn.Linear(num_channels[-1], output_dim),
+            nn.Sigmoid()
+        )
         
         # Head 2: Categorical Algorithmic Fragment Classification
+        aux_hidden = min(32, max(8, num_channels[-1]))
         self.classification_head = nn.Sequential(
-            nn.Linear(num_channels[-1], 64),
+            nn.Linear(num_channels[-1], aux_hidden),
             nn.ReLU(),
             nn.Dropout(dropout),
-            nn.Linear(64, num_fragments)
+            nn.Linear(aux_hidden, num_fragments)
         )
         
     def forward(self, x):

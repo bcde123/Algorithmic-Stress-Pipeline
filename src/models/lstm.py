@@ -29,7 +29,8 @@ class AttentionLSTM(nn.Module):
         
         self.fc = nn.Sequential(
             nn.Dropout(dropout),
-            nn.Linear(hidden_dim * 2, output_dim)
+            nn.Linear(hidden_dim * 2, output_dim),
+            nn.Sigmoid()
         )
         
     def forward(self, x):
@@ -55,14 +56,13 @@ class AttentionLSTM(nn.Module):
 
 class CircadianPositionalEncoding(nn.Module):
     """
-    Learnable positional encoding that injects time-of-day information
-    into a sequence.  Unlike fixed sinusoidal PE, this adapts to the
-    specific circadian patterns present in the training data.
+    Parameter-free circadian harmonic encoding that injects time-of-day
+    information into a sequence without adding large embedding tables.
     """
     def __init__(self, d_model: int, max_len: int = 90_000):
         super().__init__()
-        # Learnable embedding lookup: position -> d_model-dim vector
-        self.pe = nn.Embedding(max_len, d_model)
+        self.d_model = d_model
+        self.max_len = max_len
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """
@@ -72,8 +72,13 @@ class CircadianPositionalEncoding(nn.Module):
             x + positional encoding, same shape
         """
         seq_len = x.size(1)
-        positions = torch.arange(seq_len, device=x.device).unsqueeze(0)  # (1, seq_len)
-        return x + self.pe(positions)
+        positions = torch.arange(seq_len, device=x.device, dtype=x.dtype).unsqueeze(1)
+        harmonic_ids = torch.arange((self.d_model + 1) // 2, device=x.device, dtype=x.dtype) + 1.0
+        frequencies = 2.0 * torch.pi * harmonic_ids / max(float(self.max_len), 1.0)
+        pe = torch.zeros(seq_len, self.d_model, device=x.device, dtype=x.dtype)
+        pe[:, 0::2] = torch.sin(positions * frequencies[:pe[:, 0::2].shape[1]])
+        pe[:, 1::2] = torch.cos(positions * frequencies[:pe[:, 1::2].shape[1]])
+        return x + pe.unsqueeze(0)
 
 
 class CircadianAttentionLSTM(nn.Module):
@@ -85,9 +90,9 @@ class CircadianAttentionLSTM(nn.Module):
       - Input projection layer: maps raw features to a wider embedding space
         before the LSTM, giving the model more representational capacity for
         long contexts.
-      - Learnable positional encoding: injects circadian phase information
-        so the attention head can distinguish 'morning baseline' from 'afternoon
-        peak' without relying solely on recurrent state.
+      - Parameter-free circadian harmonic encoding: injects circadian phase
+        information so the attention head can distinguish 'morning baseline'
+        from 'afternoon peak' without a large embedding table.
       - Imbalance head: a dedicated output that estimates cumulative
         stress-recovery imbalance (a monotonically increasing scalar per day).
 

@@ -1,0 +1,215 @@
+\documentclass[11pt]{article}
+\usepackage[a4paper,margin=0.85in]{geometry}
+\usepackage{amsmath,amssymb}
+\usepackage{booktabs}
+\usepackage{graphicx}
+\usepackage{float}
+\usepackage{hyperref}
+\usepackage{xcolor}
+\usepackage{array}
+\usepackage{caption}
+\usepackage{subcaption}
+\usepackage{verbatim}
+
+\hypersetup{hidelinks}
+\setlength{\parskip}{0.5em}
+\setlength{\parindent}{0pt}
+\newcommand{\safeinclude}[2][]{\IfFileExists{#2}{\includegraphics[#1]{#2}}{\fbox{\parbox{0.82\linewidth}{Pending generated figure: \texttt{#2}. Run the GPU pipeline and then \texttt{python scripts/generate\_paper\_results.py}.}}}}
+
+\title{\textbf{Algorithmic Stress Monitoring Pipeline: A GPU-Accelerated Multi-Pillar Framework for Physiological Occupational Health Analytics}}
+\author{Hemant Aggarwal\\Department of Information Technology\\Indian Institute of Information Technology Allahabad\\Prayagraj, Uttar Pradesh, India\\\texttt{iit2023015@iiita.ac.in}}
+\date{}
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+Algorithmic management systems increasingly decide work pace, task assignment, interruption frequency, and performance thresholds. These decisions can produce physiological strain before workers formally report fatigue or attrition risk. This paper presents the Algorithmic Stress Monitoring Pipeline (ASMP), an end-to-end framework that harmonizes wearable streams into a common 1 Hz schema and evaluates stress through five analytical pillars: attention-based sequence modelling, temporal convolution, reconstruction-based regime detection, psychological signature clustering, and neural survival modelling. A sixth research-design layer links model outputs to occupational-health theory, adjusted causal estimands, intervention contrasts, threshold robustness, and managerial safeguards. The implementation is GPU-enabled through explicit CUDA device routing and writes reproducible result artifacts, tables, dashboards, and screenshots for paper reporting. Current generated outputs show that high-stress exposure is associated with lower HRV and higher HR after adjustment, while threshold reports translate model evidence into decision-support signals rather than punitive surveillance scores.
+\end{abstract}
+
+\textbf{Keywords:} algorithmic management, physiological stress, wearable sensing, LSTM, TCN, autoencoder, DeepSurv, causal validation, occupational health, GPU analytics
+
+\section{Introduction}
+Algorithmic work systems coordinate labour through dynamic scheduling, route optimization, queue assignment, and productivity scoring. These systems can improve throughput, but they may also compress recovery time and create persistent monitoring pressure. In occupational-health terms, the relevant risk is not only whether a worker is stressed at one instant, but whether repeated demand shocks prevent physiological recovery.
+
+ASMP addresses this problem by treating stress monitoring as a linked measurement and research-design problem. The measurement layer learns temporal stress signals from EDA, HR, temperature, accelerometry, and HRV. The research-design layer asks whether the learned signals are interpretable, parsimonious, robust to threshold choice, and useful for managerial decisions that reduce strain. This separation is important because high predictive accuracy alone is not sufficient for workplace deployment.
+
+The main contributions are:
+\begin{itemize}
+    \item A harmonized physiological data pipeline for WESAD, induced-stress Empatica data, MMASH, SWELL, and synthetic fallback validation.
+    \item GPU-ready training and evaluation for AttentionLSTM, CircadianAttentionLSTM, StressTCN, StressAutoencoder, and DeepSurv modules.
+    \item A research-design layer that reports theory constructs, sample-to-parameter ratios, adjusted high-stress effects, intervention contrasts, external validation checks, and managerial implications.
+    \item Programmatic paper artifacts: evaluation CSV/JSON files, training curves, dashboards, and rendered result screenshots.
+\end{itemize}
+
+\section{Data Harmonization and GPU Execution}
+All streams are mapped to seven canonical physiological features:
+\[
+\mathbf{x}_t = [EDA_t, HR_t, TEMP_t, ACC^x_t, ACC^y_t, ACC^z_t, HRV_t].
+\]
+Each observation also carries a unified stress index, dataset provenance, subject identifier, and intervention label when available. The harmonizer resamples streams to 1 Hz, applies subject-level normalization, and filters movement-heavy periods when physical exertion could confound psychological stress.
+
+The training pipeline selects CUDA when available and can be forced with \texttt{ASMP\_DEVICE=cuda}. Environment variables control epochs, batch size, sequence length, stride, number of workers, dataset paths, subject subsets, and full-data sampling. This makes the same code usable for quick CPU smoke tests and full GPU runs.
+
+\begin{figure}[H]
+\centering
+\safeinclude[width=0.92\linewidth]{outputs/stress_distribution.png}
+\caption{Distribution of the unified stress index across the harmonized run.}
+\label{fig:stressdist}
+\end{figure}
+
+\begin{figure}[H]
+\centering
+\safeinclude[width=0.92\linewidth]{outputs/paper_figures/dataset_composition.png}
+\caption{Dataset composition and high-stress exposure rate. This figure is generated from \texttt{outputs/dataset\_summary.csv}.}
+\label{fig:datasetcomp}
+\end{figure}
+
+\section{Analytical Pillars}
+\subsection{Pillar 1: Long-Term Dynamics}
+The AttentionLSTM models stress as a sequence problem. It learns which time steps in a 60-second window are most informative for predicting the end-of-window stress index. The CircadianAttentionLSTM adds harmonic positional encoding and an imbalance head, allowing the model to represent repeated stress-recovery asymmetry.
+
+\begin{figure}[H]
+\centering
+\safeinclude[width=0.9\linewidth]{outputs/circadian_curve.png}
+\caption{Circadian proxy output showing predicted stress, imbalance, and attention structure.}
+\label{fig:circadian}
+\end{figure}
+
+\subsection{Pillar 2: Short-Term Reactions}
+The StressTCN uses causal temporal convolutions to detect acute physiological reactions. Compared with recurrent networks, this architecture is efficient on GPUs because window operations are parallelizable. It is used for short-burst stress responses that may not require a full recurrent state representation.
+
+\subsection{Pillar 3: Latent Regime Detection}
+The StressAutoencoder reconstructs physiological windows and treats high reconstruction error as a latent regime shift. In the current generated threshold report, 2 out of 39 validation windows were flagged at the 95th percentile threshold, corresponding to a normal warning state in the subject-level report. The exact counts update automatically after the full GPU run.
+
+\begin{figure}[H]
+\centering
+\safeinclude[width=0.92\linewidth]{outputs/regime_timeline.png}
+\caption{Autoencoder reconstruction error timeline with 95th percentile regime threshold.}
+\label{fig:regime}
+\end{figure}
+
+\subsection{Pillar 4: Psychological Signature Clustering}
+Attention-weighted physiological profiles are clustered into three interpretable signatures: cognitive overload, high agitation, and stable pacing. These clusters convert high-dimensional model outputs into managerially interpretable physiological patterns.
+
+\begin{figure}[H]
+\centering
+\begin{subfigure}{0.48\linewidth}
+\centering
+\safeinclude[width=\linewidth]{outputs/signature_heatmap.png}
+\caption{Signature heatmap}
+\end{subfigure}
+\begin{subfigure}{0.48\linewidth}
+\centering
+\safeinclude[width=\linewidth]{outputs/pressure_nodes.png}
+\caption{Pressure-node embedding}
+\end{subfigure}
+\caption{Psychological signature outputs from attention-weighted physiological profiles.}
+\label{fig:signatures}
+\end{figure}
+
+\subsection{Pillar 5: Attrition and Burnout Risk}
+DeepSurv estimates a log-risk score from aggregated physiological covariates using the Cox partial likelihood. The output is compared with a Cox proportional-hazards baseline through the concordance index when sufficient event variation is available. In deployment, this score should be used only as a decision-support signal for redesigning work conditions, not as an individual disciplinary metric.
+
+\section{Research Design and Causal Evidence}
+ASMP embeds model results in a research-design layer. The layer maps physiological metrics to constructs from Job Demands-Resources theory, Demand-Control theory, Effort-Recovery theory, and labour-economics interpretations of turnover risk.
+
+The generated research-design summary reports the following current adjusted estimates:
+\begin{itemize}
+    \item High stress exposure, defined as \(\texttt{stress\_index} \geq 0.60\), is associated with lower HRV: effect \(=-1.0339\), 95\% CI \([-1.1120,-0.9662]\).
+    \item High stress exposure is associated with higher HR: effect \(=+1.2675\), 95\% CI \([+1.1991,+1.3216]\).
+    \item The high-demand intervention contrast increases the stress index by \(+0.5905\), with 95\% CI \([+0.5773,+0.6036]\) in the current generated output.
+\end{itemize}
+
+These estimates should be interpreted as adjusted associations under explicit assumptions, not as unrestricted causal proof. They become stronger when external holdout validation and source intervention labels support the same direction.
+
+\begin{figure}[H]
+\centering
+\safeinclude[width=0.95\linewidth]{outputs/paper_figures/causal_robustness.png}
+\caption{Adjusted high-stress effects and robustness to threshold choice.}
+\label{fig:causal}
+\end{figure}
+
+\begin{figure}[H]
+\centering
+\safeinclude[width=0.9\linewidth]{outputs/paper_figures/model_parsimony.png}
+\caption{Model parsimony and sample-to-parameter support.}
+\label{fig:parsimony}
+\end{figure}
+
+\section{Quantitative Results}
+The GPU pipeline writes \texttt{outputs/evaluation\_metrics.csv}, \texttt{outputs/evaluation\_metrics.json}, \texttt{outputs/training\_history.csv}, and \texttt{outputs/dataset\_summary.csv}. These files are consumed by \texttt{scripts/generate\_paper\_results.py} to create the figures below.
+
+\begin{figure}[H]
+\centering
+\safeinclude[width=0.95\linewidth]{outputs/paper_figures/evaluation_metrics.png}
+\caption{Model and baseline evaluation metrics across analytical pillars.}
+\label{fig:metrics}
+\end{figure}
+
+\begin{figure}[H]
+\centering
+\safeinclude[width=0.92\linewidth]{outputs/paper_figures/training_curves.png}
+\caption{Training and validation loss curves from the GPU run.}
+\label{fig:trainingcurves}
+\end{figure}
+
+\begin{figure}[H]
+\centering
+\safeinclude[width=0.86\linewidth]{outputs/paper_figures/threshold_dashboard.png}
+\caption{Subject-level decision-support dashboard derived from threshold report outputs.}
+\label{fig:threshold}
+\end{figure}
+
+\section{Generated Result Screenshots}
+The following screenshots are generated directly from the result files to make the paper auditable. They should be regenerated after every full dataset run.
+
+\begin{figure}[H]
+\centering
+\safeinclude[width=0.98\linewidth]{outputs/paper_figures/gpu_results_screenshot.png}
+\caption{GPU results dashboard screenshot generated from \texttt{evaluation\_metrics.json}.}
+\label{fig:gpuscreenshot}
+\end{figure}
+
+\begin{figure}[H]
+\centering
+\safeinclude[width=0.98\linewidth]{outputs/paper_figures/research_design_screenshot.png}
+\caption{Research-design summary screenshot generated from \texttt{research\_design\_summary.txt}.}
+\label{fig:researchscreenshot}
+\end{figure}
+
+\begin{figure}[H]
+\centering
+\safeinclude[width=0.98\linewidth]{outputs/paper_figures/threshold_report_screenshot.png}
+\caption{Threshold report screenshot generated from \texttt{threshold\_report.txt}.}
+\label{fig:thresholdscreenshot}
+\end{figure}
+
+\section{Managerial and Ethical Interpretation}
+The pipeline is designed for redesigning work, not ranking workers. A high-stress flag should trigger investigation of workload, break timing, interruption frequency, shift design, or autonomy constraints. ASMP therefore reports policy implications alongside metrics. Current generated recommendations emphasize non-punitive decision support, recovery breaks, interruption reduction, external validation before deployment, and preference for parsimonious models unless complex models add validated value.
+
+The survival and threshold modules are especially sensitive. They can identify patterns consistent with elevated attrition risk, but they should not be used to deny work opportunities, intensify monitoring, or make employment decisions without independent validation, human review, and organizational safeguards.
+
+\section{Limitations}
+The present implementation can run on synthetic fallback data or real datasets. Synthetic fallback is useful for validating code paths but cannot establish field performance. Real-data results depend on dataset label quality, sensor missingness, class balance, and whether interventions approximate workplace demand. The causal estimands rely on conditional exchangeability after adjustment for physical movement, temperature, and dataset indicators; unobserved confounding remains possible. External validation across organizations is required before deployment.
+
+\section{Conclusion}
+ASMP provides a reproducible GPU-ready pipeline for physiological stress analytics under algorithmic management. It integrates sequence models, convolutional models, anomaly detection, clustering, survival analysis, and research-design reporting. The strongest contribution is not a single model score, but a complete evidence chain: harmonized data, reproducible training, transparent metrics, robustness checks, screenshots of generated outputs, and managerial safeguards that translate physiological signals into work-redesign decisions.
+
+\begin{thebibliography}{13}
+\bibitem{rosenblat} A. Rosenblat and L. Stark, ``Algorithmic labor and information asymmetries,'' \emph{International Journal of Communication}, 2016.
+\bibitem{jd} A. B. Bakker and E. Demerouti, ``The Job Demands-Resources model: State of the art,'' \emph{Journal of Managerial Psychology}, 2007.
+\bibitem{karasek} R. Karasek, ``Job demands, job decision latitude, and mental strain,'' \emph{Administrative Science Quarterly}, 1979.
+\bibitem{effort} T. Meijman and G. Mulder, ``Psychological aspects of workload,'' in \emph{Handbook of Work and Organizational Psychology}, 1998.
+\bibitem{bou} W. Boucsein, \emph{Electrodermal Activity}, Springer, 2012.
+\bibitem{healey} J. Healey and R. Picard, ``Detecting stress during real-world driving tasks using physiological sensors,'' \emph{IEEE Transactions on Intelligent Transportation Systems}, 2005.
+\bibitem{wesad} P. Schmidt et al., ``Introducing WESAD, a multimodal dataset for wearable stress and affect detection,'' \emph{ICMI}, 2018.
+\bibitem{tcn} S. Bai, J. Kolter, and V. Koltun, ``An empirical evaluation of generic convolutional and recurrent networks for sequence modeling,'' arXiv:1803.01271, 2018.
+\bibitem{deepsurv} J. Katzman et al., ``DeepSurv: Personalized treatment recommender system using a Cox proportional hazards deep neural network,'' \emph{BMC Medical Research Methodology}, 2018.
+\bibitem{ppo} J. Schulman et al., ``Proximal policy optimization algorithms,'' arXiv:1707.06347, 2017.
+\bibitem{mmash} F. Rossi et al., ``Multilevel monitoring of activity and sleep in healthy people,'' PhysioNet, 2020.
+\bibitem{swell} S. Koldijk et al., ``The SWELL knowledge work dataset for stress and user modeling research,'' \emph{ICMI}, 2014.
+\bibitem{induced} L. Moya-Alcover et al., ``Wearable device dataset from induced stress and structured exercise sessions,'' PhysioNet, 2022.
+\end{thebibliography}
+
+\end{document}

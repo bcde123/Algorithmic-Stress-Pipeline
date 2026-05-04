@@ -10,8 +10,10 @@ class DeepSurv(nn.Module):
     Inputs are physiological and embedded covariates.
     Outputs a single scalar for each sample representing the proportional log-risk.
     """
-    def __init__(self, input_dim, hidden_layers=[64, 32], dropout=0.2):
+    def __init__(self, input_dim, hidden_layers=None, dropout=0.2):
         super(DeepSurv, self).__init__()
+        if hidden_layers is None:
+            hidden_layers = [32, 16]
         
         layers = []
         current_dim = input_dim
